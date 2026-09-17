@@ -962,7 +962,22 @@ def _save_analysis_json(
 ) -> Path | None:
     try:
         output_path = _analysis_output_path(source_video)
-        semantic_segments = _extract_semantic_segments_from_analysis(analysis_text)
+        source_duration = float(_get_video_meta(str(source_video)).get("duration_seconds", 0.0) or 0.0)
+        analysis_duration = float(_get_video_meta(str(analysis_video)).get("duration_seconds", 0.0) or 0.0)
+        time_scale = source_duration / analysis_duration if analysis_duration > 0 else 1.0
+        def map_segments(segments):
+            if source_duration <= 0 or analysis_duration <= 0: return segments
+            mapped = []
+            for segment in segments:
+                item = dict(segment)
+                start = max(0.0, min(source_duration, float(item["start"]) * time_scale))
+                end = max(0.0, min(source_duration, float(item["end"]) * time_scale))
+                if end <= start: continue
+                item["start"], item["end"] = round(start, 2), round(end, 2)
+                if "duration" in item: item["duration"] = round(end - start, 2)
+                mapped.append(item)
+            return mapped
+        semantic_segments = map_segments(_extract_semantic_segments_from_analysis(analysis_text))
         semantic_segments = _prepare_semantic_segments(semantic_segments)
         payload = {
             "source_video": str(source_video),
@@ -970,7 +985,10 @@ def _save_analysis_json(
             "analysis_goal": analysis_goal,
             "video_url_used": video_url_used,
             "audio_url_used": audio_url_used,
-            "segments": _extract_time_segments_from_analysis(analysis_text),
+            "source_duration_seconds": round(source_duration, 3),
+            "analysis_duration_seconds": round(analysis_duration, 3),
+            "analysis_to_source_time_scale": round(time_scale, 8),
+            "segments": map_segments(_extract_time_segments_from_analysis(analysis_text)),
             "semantic_segments": semantic_segments,
             "semantic_index": _build_semantic_index_meta(semantic_segments),
             "analysis_text": analysis_text,
